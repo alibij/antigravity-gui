@@ -1,14 +1,7 @@
 import http.server
-
-import os
 import json
-import subprocess
+import os
 import shutil
-import uuid
-
-import pty
-import select
-
 import subprocess
 import urllib.parse
 import urllib.request
@@ -100,7 +93,7 @@ def get_usage_data():
             print("Fast RPC failed:", e)
             pass
 
-    # Fallback to slow CLI
+    # Fallback to CLI
     try:
         proc = subprocess.run([CLI_BIN, "-p", "/usage"], capture_output=True, text=True, timeout=10)
         lines = proc.stdout.strip().split("\n")
@@ -108,7 +101,8 @@ def get_usage_data():
         import re
         for line in lines:
             line = line.strip().replace("\r", "")
-            if not line or "Limit Remaining" not in line: continue
+            if not line or "Limit Remaining" not in line:
+                continue
             
             group = line.lower()
             period = line.lower()
@@ -161,7 +155,8 @@ def get_user_info():
     return {"email": email, "tier": tier}
 
 def remove_from_history(cid):
-    if not HISTORY_FILE.exists(): return
+    if not HISTORY_FILE.exists():
+        return
     try:
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -188,9 +183,8 @@ def save_custom_title(cid, new_title):
     with open(TITLES_FILE, "w", encoding="utf-8") as f:
         json.dump(titles, f, ensure_ascii=False, indent=2)
 
-
 def delayed_cleanup(temp_id):
-    import time, shutil, threading
+    import threading, time
     def _cleanup():
         time.sleep(5)
         temp_dir = BRAIN_DIR / temp_id
@@ -202,6 +196,38 @@ def delayed_cleanup(temp_id):
         remove_from_history(temp_id)
     threading.Thread(target=_cleanup, daemon=True).start()
 
+def get_first_prompt(cid):
+    logs_dir = BRAIN_DIR / cid / ".system_generated" / "logs"
+    for filename in ["transcript_full.jsonl", "transcript.jsonl"]:
+        p = logs_dir / filename
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        data = json.loads(line)
+                        if data.get("type") == "USER_INPUT" or data.get("source") == "USER_EXPLICIT":
+                            c = data.get("content")
+                            raw_text = ""
+                            if isinstance(c, str):
+                                raw_text = c.strip()
+                            elif isinstance(c, dict) and "text" in c:
+                                raw_text = c["text"].strip()
+                                
+                            if raw_text:
+                                lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+                                if lines:
+                                    first_line = lines[0]
+                                    words = first_line.split()
+                                    if len(words) > 6:
+                                        first_line = " ".join(words[:6]) + "..."
+                                    if len(first_line) > 35:
+                                        first_line = first_line[:32] + "..."
+                                    return first_line
+                            return "چت جدید"
+            except Exception:
+                pass
+    return None
+
 def get_antigravity_sessions():
     custom_titles = load_custom_titles()
     sessions = {}
@@ -211,11 +237,13 @@ def get_antigravity_sessions():
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if not line: continue
+                    if not line:
+                        continue
                     try:
                         record = json.loads(line)
                         cid = record.get("conversationId")
-                        if not cid or cid.startswith("temp-"): continue
+                        if not cid or cid.startswith("temp-"):
+                            continue
                         
                         ts = record.get("timestamp", 0) / 1000.0
                         if cid not in sessions:
@@ -259,38 +287,6 @@ def get_antigravity_sessions():
     result.sort(key=lambda x: x["timestamp"], reverse=True)
     return result
 
-def get_first_prompt(cid):
-    logs_dir = BRAIN_DIR / cid / ".system_generated" / "logs"
-    for filename in ["transcript_full.jsonl", "transcript.jsonl"]:
-        p = logs_dir / filename
-        if p.exists():
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    for line in f:
-                        data = json.loads(line)
-                        if data.get("type") == "USER_INPUT" or data.get("source") == "USER_EXPLICIT":
-                            c = data.get("content")
-                            raw_text = ""
-                            if isinstance(c, str):
-                                raw_text = c.strip()
-                            elif isinstance(c, dict) and "text" in c:
-                                raw_text = c["text"].strip()
-                                
-                            if raw_text:
-                                lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
-                                if lines:
-                                    first_line = lines[0]
-                                    words = first_line.split()
-                                    if len(words) > 6:
-                                        first_line = " ".join(words[:6]) + "..."
-                                    if len(first_line) > 35:
-                                        first_line = first_line[:32] + "..."
-                                    return first_line
-                            return "چت جدید"
-            except Exception:
-                pass
-    return None
-
 def load_conversation_messages(cid):
     messages = []
     logs_dir = BRAIN_DIR / cid / ".system_generated" / "logs"
@@ -303,13 +299,13 @@ def load_conversation_messages(cid):
             with open(log_file, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if not line: continue
+                    if not line:
+                        continue
                     try:
                         record = json.loads(line)
                         src = record.get("source", "")
                         stype = record.get("type", "")
                         
-                        # Only show user messages and planner (assistant) text responses
                         if stype not in ["USER_INPUT", "PLANNER_RESPONSE"] and src != "USER_EXPLICIT":
                             continue
                             
@@ -324,11 +320,14 @@ def load_conversation_messages(cid):
                         elif isinstance(content, list):
                             texts = []
                             for item in content:
-                                if isinstance(item, str): texts.append(item)
-                                elif isinstance(item, dict) and "text" in item: texts.append(item["text"])
+                                if isinstance(item, str):
+                                    texts.append(item)
+                                elif isinstance(item, dict) and "text" in item:
+                                    texts.append(item["text"])
                             text = "\n".join(texts)
 
-                        if not text: continue
+                        if not text:
+                            continue
 
                         role = "user" if (stype == "USER_INPUT" or src == "USER_EXPLICIT") else "assistant"
                         messages.append({"role": role, "text": text, "created_at": created_at})
@@ -454,14 +453,11 @@ class AppHandler(http.server.BaseHTTPRequestHandler):
             for m in msgs[-10:]:
                 prompt += f"{m['role']}: {m['text'][:150]}\n"
             
-            #
-            
             temp_id = "temp-" + str(uuid.uuid4())
             proc = subprocess.run([CLI_BIN, "--dangerously-skip-permissions", "--model", "gemini-3.8-flash-low", "--conversation", temp_id, "-p", prompt], capture_output=True, text=True)
             suggested = proc.stdout.strip().replace('"', '').replace('\"', '')
             
             delayed_cleanup(temp_id)
-                
             self._send_json({"title": suggested})
             return
 
@@ -500,7 +496,6 @@ class AppHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     pass
             
-            # update from body
             if "language" in body: settings["language"] = body["language"]
             if "model" in body: settings["model"] = body["model"]
             if "effort" in body: settings["effort"] = body["effort"]
@@ -518,13 +513,11 @@ class AppHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"status": "red", "detail": "آدرس پروکسی وارد نشده است."})
                 return
             
-            # 1. Test Proxy Connectivity
             proc1 = subprocess.run(["curl", "-s", "-x", proxy, "-m", "5", "http://gstatic.com/generate_204"], capture_output=True)
             if proc1.returncode != 0:
                 self._send_json({"status": "red", "detail": "ارتباط با پروکسی برقرار نشد. (Time out / Refused)"})
                 return
             
-            # 2. Test Antigravity Servers (Codeium)
             proc2 = subprocess.run(["curl", "-s", "-I", "-x", proxy, "-m", "7", "https://server.codeium.com"], capture_output=True, text=True)
             out = proc2.stdout + proc2.stderr
             if "403" in out or "Forbidden" in out or "error code: 1020" in out.lower():
@@ -540,6 +533,7 @@ class AppHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"ok")
+
         elif url.path == "/api/chat":
             prompt = body.get("prompt", "").strip()
             session_id = body.get("session_id")
@@ -566,22 +560,21 @@ class AppHandler(http.server.BaseHTTPRequestHandler):
 
             env = os.environ.copy()
             env["FORCE_COLOR"] = "1"
+            env["PYTHONUNBUFFERED"] = "1"
             if proxy:
                 env["HTTP_PROXY"] = proxy
                 env["HTTPS_PROXY"] = proxy
                 env["ALL_PROXY"] = proxy
             
             try:
-                master, slave = pty.openpty()
                 proc = subprocess.Popen(
                     cmd,
-                    stdin=slave,
-                    stdout=slave,
-                    stderr=slave,
-                    close_fds=True,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=0,
                     env=env
                 )
-                os.close(slave)
 
                 real_session_id = session_id
                 if is_new_session:
@@ -600,35 +593,15 @@ class AppHandler(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(meta.encode("utf-8"))
                     self.wfile.flush()
 
+                # استریم مستقیم بایت‌های خروجی روی ویندوز
                 while True:
-                    r, _, _ = select.select([master], [], [], 0.1)
-                    if master in r:
-                        try:
-                            chunk = os.read(master, 4096)
-                            if not chunk:
-                                break
-                            self.wfile.write(chunk)
-                            self.wfile.flush()
-                        except OSError:
-                            break
-                    
-                    if proc.poll() is not None:
-                        try:
-                            while True:
-                                r_rem, _, _ = select.select([master], [], [], 0)
-                                if master in r_rem:
-                                    chunk = os.read(master, 4096)
-                                    if not chunk:
-                                        break
-                                    self.wfile.write(chunk)
-                                    self.wfile.flush()
-                                else:
-                                    break
-                        except OSError:
-                            pass
+                    chunk = proc.stdout.read(1024)
+                    if not chunk and proc.poll() is not None:
                         break
+                    if chunk:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
 
-                os.close(master)
                 proc.wait()
             except Exception as e:
                 self.wfile.write(f"\nError: {str(e)}".encode("utf-8"))
